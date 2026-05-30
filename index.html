@@ -859,10 +859,13 @@ ${ps}
   window.addEventListener("keydown", e => {
     const mod = e.metaKey || e.ctrlKey;
     if(mod && e.key.toLowerCase()==="s"){ e.preventDefault(); exportFile(); return; }
-    // Q and I always open file pickers regardless of focus
-    if(e.key==="q"||e.key==="Q"){ e.preventDefault(); videoInput.click(); return; }
-    if(e.key==="i"||e.key==="I"){ e.preventDefault(); fileInput.click(); return; }
-    // rest of shortcuts are blocked while typing in a text/input field
+    // Q and I work unless focus is inside a subtitle editing field
+    const inList = listEl.contains(document.activeElement);
+    if(!inList){
+      if(e.key==="q"||e.key==="Q"){ e.preventDefault(); videoInput.click(); return; }
+      if(e.key==="i"||e.key==="I"){ e.preventDefault(); fileInput.click(); return; }
+    }
+    // rest of shortcuts are blocked while typing in any text/input field
     if(isEditing()) return;
     if(mod && e.key.toLowerCase()==="z" && !e.shiftKey){ e.preventDefault(); undo(); return; }
     if(mod && (e.key.toLowerCase()==="y" || (e.shiftKey && e.key.toLowerCase()==="z"))){ e.preventDefault(); redo(); return; }
