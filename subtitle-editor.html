@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Subtitle Editor</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel-2:#1d212b; --row:#1a1d24;
+    --border:#2a2f3a; --text:#e6e9ef; --muted:#9aa3b2; --accent:#3b82f6;
+    --accent-2:#2563eb; --sel:#15294a; --sel-border:#3b82f6; --danger:#ef4444;
+    --good:#22c55e; --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  /* ---------- header ---------- */
+  header{
+    position:sticky; top:0; z-index:20; display:flex; align-items:center; gap:14px;
+    padding:12px 20px; background:var(--panel); border-bottom:1px solid var(--border);
+  }
+  .brand{font-weight:700; font-size:16px; letter-spacing:.2px; margin-right:auto}
+  .brand .dot{color:var(--accent)}
+  /* ---------- buttons ---------- */
+  button{
+    font:inherit; color:var(--text); background:var(--panel-2); border:1px solid var(--border);
+    border-radius:8px; padding:7px 12px; cursor:pointer; transition:.12s; white-space:nowrap;
+  }
+  button:hover{background:#262b36; border-color:#3a4150}
+  button:disabled{opacity:.4; cursor:not-allowed}
+  button.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+  button.primary:hover{background:var(--accent-2)}
+  button.danger{color:#fecaca}
+  button.danger:hover{background:#3a1d22; border-color:var(--danger)}
+  button.small{padding:5px 9px; font-size:12.5px; border-radius:7px}
+  /* ---------- layout ---------- */
+  main{max-width:1180px; margin:0 auto; padding:18px 20px 80px}
+  /* ---------- empty state ---------- */
+  #empty{
+    margin:8vh auto; max-width:560px; text-align:center; padding:46px 28px;
+    border:2px dashed var(--border); border-radius:16px; background:var(--panel);
+  }
+  #empty h1{font-size:22px; margin:6px 0 8px}
+  #empty p{color:var(--muted); margin:0 0 22px}
+  #empty .big{font-size:46px; line-height:1}
+  body.dragging #empty{border-color:var(--accent); background:#13203a}
+  body.dragging::after{
+    content:"Drop to load"; position:fixed; inset:0; display:flex; align-items:center;
+    justify-content:center; font-size:24px; font-weight:700; color:#fff;
+    background:rgba(59,130,246,.18); z-index:50; pointer-events:none;
+  }
+  /* ---------- toolbar ---------- */
+  #toolbar{
+    position:sticky; top:57px; z-index:10; display:flex; align-items:center; gap:12px;
+    flex-wrap:wrap; padding:12px 14px; margin-bottom:14px;
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+  }
+  .meta{display:flex; flex-direction:column; line-height:1.25; margin-right:auto; min-width:0}
+  .meta .name{font-weight:600; max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .meta .counts{color:var(--muted); font-size:12.5px}
+  .meta .counts b{color:var(--accent)}
+  .joinwrap{display:flex; align-items:center; gap:6px; color:var(--muted); font-size:12.5px;
+    padding:0 4px; border-left:1px solid var(--border); border-right:1px solid var(--border)}
+  .joinwrap input{accent-color:var(--accent)}
+  /* ---------- caption rows ---------- */
+  #list{display:flex; flex-direction:column; gap:8px}
+  .row{
+    display:grid; grid-template-columns:26px 42px 150px 1fr 132px; gap:12px; align-items:start;
+    padding:10px 12px; background:var(--row); border:1px solid var(--border); border-radius:10px;
+  }
+  .row.selected{background:var(--sel); border-color:var(--sel-border)}
+  .row .sel{width:17px; height:17px; margin-top:7px; accent-color:var(--accent); cursor:pointer}
+  .row .num{font-variant-numeric:tabular-nums; color:var(--muted); font-weight:600;
+    padding-top:6px; text-align:right; cursor:pointer; user-select:none}
+  .times{display:flex; flex-direction:column; gap:4px}
+  .tc{
+    width:100%; font-family:var(--mono); font-size:12.5px; color:var(--text);
+    background:var(--panel-2); border:1px solid var(--border); border-radius:6px; padding:5px 7px;
+  }
+  .tc:focus{outline:none; border-color:var(--accent)}
+  .tc.bad{border-color:var(--danger); color:#fecaca}
+  .dur{color:var(--muted); font-size:11px; font-family:var(--mono); text-align:center}
+  textarea.text{
+    width:100%; min-height:38px; resize:none; overflow:hidden;
+    font:15px/1.45 inherit; color:var(--text);
+    background:var(--panel-2); border:1px solid var(--border); border-radius:8px; padding:8px 10px;
+  }
+  textarea.text:focus{outline:none; border-color:var(--accent)}
+  .actions{display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end}
+  /* ---------- toast ---------- */
+  #toast{
+    position:fixed; left:50%; bottom:24px; transform:translateX(-50%) translateY(20px);
+    background:#0b1220; color:#fff; border:1px solid var(--border); border-radius:10px;
+    padding:10px 16px; opacity:0; transition:.25s; z-index:60; pointer-events:none; max-width:90vw;
+  }
+  #toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+  .hint{color:var(--muted); font-size:12px; text-align:center; margin-top:18px}
+  kbd{font-family:var(--mono); font-size:11px; background:var(--panel-2);
+    border:1px solid var(--border); border-bottom-width:2px; border-radius:5px; padding:1px 5px}
+  @media (max-width:720px){
+    .row{grid-template-columns:24px 1fr; row-gap:8px}
+    .row .num{text-align:left} .times{flex-direction:row} .actions{justify-content:flex-start}
+  }
+</style>
+</head>
+<body>
+  <header>
+    <div class="brand">🎬 Subtitle Editor<span class="dot">.</span></div>
+    <button id="importBtn">Import .srt</button>
+    <button id="exportBtn" class="primary" disabled>Export .srt</button>
+  </header>
+
+  <main>
+    <!-- empty state -->
+    <section id="empty">
+      <div class="big">🎬</div>
+      <h1>Drop a subtitle file to start</h1>
+      <p>Import an <b>.srt</b> file, then select captions and merge, split, edit or delete them.</p>
+      <button id="chooseBtn" class="primary">Choose .srt file…</button>
+    </section>
+
+    <!-- editor -->
+    <section id="editor" style="display:none">
+      <div id="toolbar">
+        <div class="meta">
+          <span class="name" id="fileName">subtitles.srt</span>
+          <span class="counts"><b id="totalCount">0</b> captions · <b id="selCount">0</b> selected</span>
+        </div>
+        <button id="selectAllBtn" class="small">Select all</button>
+        <label class="joinwrap" title="How merged caption text is joined">
+          <input type="checkbox" id="joinNewline"> join with line break
+        </label>
+        <button id="mergeBtn" class="primary small" disabled>⤵ Merge selected</button>
+        <button id="deleteSelBtn" class="danger small" disabled>Delete selected</button>
+      </div>
+      <div id="list"></div>
+      <div class="hint">
+        Tip: click a caption (or its checkbox) to select · <kbd>Shift</kbd>+click for a range ·
+        <kbd>M</kbd> merge · <kbd>Del</kbd> delete · <kbd>⌘/Ctrl</kbd>+<kbd>S</kbd> export
+      </div>
+    </section>
+  </main>
+
+  <input type="file" id="fileInput" accept=".srt,.txt,text/plain" hidden>
+  <div id="toast"></div>
+
+<script>
+"use strict";
+(function(){
+  // ---------- state ----------
+  let cues = [];                 // { id, start, end, text }   start/end in ms
+  let selectedIds = new Set();
+  let nextId = 1;
+  let originalName = "subtitles";
+  let lastClickedId = null;      // anchor for shift-click range
+
+  // ---------- element refs ----------
+  const $ = (id) => document.getElementById(id);
+  const emptyEl=$("empty"), editorEl=$("editor"), listEl=$("list");
+  const fileInput=$("fileInput");
+  const fileNameEl=$("fileName"), totalCountEl=$("totalCount"), selCountEl=$("selCount");
+  const mergeBtn=$("mergeBtn"), deleteSelBtn=$("deleteSelBtn"), selectAllBtn=$("selectAllBtn");
+  const exportBtn=$("exportBtn"), joinNewline=$("joinNewline");
+
+  // ---------- time helpers ----------
+  const pad = (n,len) => String(n).padStart(len,"0");
+  function timecodeToMs(tc){
+    const m = String(tc).trim().match(/^(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})$/);
+    if(!m) return null;
+    return ((+m[1])*3600 + (+m[2])*60 + (+m[3]))*1000 + (+m[4].padEnd(3,"0"));
+  }
+  function msToTimecode(ms){
+    ms = Math.max(0, Math.round(ms));
+    const h=Math.floor(ms/3600000); ms-=h*3600000;
+    const mi=Math.floor(ms/60000);  ms-=mi*60000;
+    const s=Math.floor(ms/1000);    ms-=s*1000;
+    return `${pad(h,2)}:${pad(mi,2)}:${pad(s,2)},${pad(ms,3)}`;
+  }
+  function durLabel(ms){ return (ms/1000).toFixed(2)+"s"; }
+
+  // ---------- SRT parse / serialize ----------
+  const TIME_RE = /(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})/;
+  function parseSRT(text){
+    text = text.replace(/^﻿/,"").replace(/\r\n?/g,"\n");
+    const blocks = text.split(/\n\s*\n+/);
+    const out = []; let skipped = 0;
+    for(const raw of blocks){
+      const block = raw.replace(/^\n+|\n+$/g,"");
+      if(!block.trim()) continue;
+      const lines = block.split("\n");
+      const ti = lines.findIndex(l => TIME_RE.test(l));   // tolerate missing/extra index lines
+      if(ti === -1){ skipped++; continue; }
+      const m = lines[ti].match(TIME_RE);
+      const start = ((+m[1])*3600+(+m[2])*60+(+m[3]))*1000 + (+m[4].padEnd(3,"0"));
+      const end   = ((+m[5])*3600+(+m[6])*60+(+m[7]))*1000 + (+m[8].padEnd(3,"0"));
+      out.push({ id: nextId++, start, end, text: lines.slice(ti+1).join("\n").trim() });
+    }
+    return { cues: out, skipped };
+  }
+  function toSRT(){
+    return cues.map((c,i) =>
+      `${i+1}\n${msToTimecode(c.start)} --> ${msToTimecode(c.end)}\n${c.text}`
+    ).join("\n\n") + "\n";
+  }
+
+  // ---------- rendering ----------
+  function render(){
+    const has = cues.length > 0;
+    emptyEl.style.display = has ? "none" : "";
+    editorEl.style.display = has ? "" : "none";
+    exportBtn.disabled = !has;
+    if(!has){ updateToolbar(); return; }
+
+    const frag = document.createDocumentFragment();
+    cues.forEach((c,idx) => frag.appendChild(buildRow(c,idx)));
+    listEl.replaceChildren(frag);
+    // textareas need to be in the DOM before measuring their height
+    listEl.querySelectorAll("textarea.text").forEach(autoGrow);
+    updateToolbar();
+  }
+
+  function buildRow(c, idx){
+    const row = document.createElement("div");
+    row.className = "row" + (selectedIds.has(c.id) ? " selected" : "");
+    row.dataset.id = c.id;
+    // selecting by clicking the row, except on the editable controls / buttons
+    row.addEventListener("click", (e) => {
+      if(e.target.closest("textarea, input.tc, button")) return;
+      toggleSelect(c.id, e);
+    });
+
+    // checkbox
+    const cb = document.createElement("input");
+    cb.type="checkbox"; cb.className="sel"; cb.checked=selectedIds.has(c.id);
+
+    // number
+    const num = document.createElement("div");
+    num.className="num"; num.textContent = idx+1;
+
+    // times (start over end) + duration
+    const times = document.createElement("div");
+    times.className="times";
+    const startIn = mkTc(c,"start"), endIn = mkTc(c,"end");
+    const dur = document.createElement("div");
+    dur.className="dur"; dur.textContent = durLabel(c.end - c.start);
+    times.append(startIn, endIn, dur);
+    // keep start<end consistent and refresh duration after either edit
+    function commit(which, inp){
+      const ms = timecodeToMs(inp.value);
+      if(ms === null){ inp.classList.add("bad"); return; }
+      inp.classList.remove("bad");
+      c[which] = ms;
+      if(c.start > c.end){ if(which==="start") c.end=c.start; else c.start=c.end; }
+      startIn.value = msToTimecode(c.start);
+      endIn.value   = msToTimecode(c.end);
+      dur.textContent = durLabel(c.end - c.start);
+    }
+    startIn.addEventListener("blur", () => commit("start", startIn));
+    endIn.addEventListener("blur",   () => commit("end",   endIn));
+    [startIn,endIn].forEach(inp => inp.addEventListener("keydown", e => {
+      if(e.key==="Enter"){ e.preventDefault(); inp.blur(); }
+    }));
+
+    // text
+    let caret = null;   // remember caret so Split knows where to cut
+    const ta = document.createElement("textarea");
+    ta.className="text"; ta.value=c.text; ta.spellcheck=false; ta.rows=1;
+    ta.addEventListener("input", () => { c.text = ta.value; autoGrow(ta); });
+    ["keyup","click","select"].forEach(ev =>
+      ta.addEventListener(ev, () => { caret = ta.selectionStart; }));
+
+    // actions
+    const actions = document.createElement("div");
+    actions.className="actions";
+    const splitBtn = mkBtn("Split","small",() => splitCue(c.id, caret));
+    const delBtn   = mkBtn("Delete","small danger",() => deleteCues([c.id]));
+    actions.append(splitBtn, delBtn);
+
+    row.append(cb, num, times, ta, actions);
+    return row;
+  }
+
+  function mkTc(c, key){
+    const inp = document.createElement("input");
+    inp.type="text"; inp.className="tc"; inp.value=msToTimecode(c[key]); inp.spellcheck=false;
+    return inp;
+  }
+  function mkBtn(label, cls, onClick){
+    const b = document.createElement("button");
+    b.type="button"; b.className=cls; b.textContent=label;
+    b.addEventListener("click", onClick);
+    return b;
+  }
+  function autoGrow(ta){
+    ta.style.height="auto";
+    ta.style.height = Math.min(ta.scrollHeight, 220) + "px";
+  }
+
+  function updateToolbar(){
+    totalCountEl.textContent = cues.length;
+    selCountEl.textContent = selectedIds.size;
+    mergeBtn.disabled = selectedIds.size < 2;
+    deleteSelBtn.disabled = selectedIds.size < 1;
+    selectAllBtn.textContent =
+      (cues.length && selectedIds.size === cues.length) ? "Select none" : "Select all";
+  }
+
+  // lightweight selection refresh (no full rebuild → keeps textareas/scroll intact)
+  function refreshSelectionUI(){
+    listEl.querySelectorAll(".row").forEach(row => {
+      const on = selectedIds.has(+row.dataset.id);
+      row.classList.toggle("selected", on);
+      row.querySelector(".sel").checked = on;
+    });
+    updateToolbar();
+  }
+
+  // ---------- selection ----------
+  function toggleSelect(id, e){
+    if(e && e.shiftKey && lastClickedId !== null && lastClickedId !== id){
+      const ids = cues.map(c=>c.id);
+      const a=ids.indexOf(lastClickedId), b=ids.indexOf(id);
+      if(a>-1 && b>-1){ const lo=Math.min(a,b), hi=Math.max(a,b);
+        for(let i=lo;i<=hi;i++) selectedIds.add(ids[i]); }
+    } else {
+      selectedIds.has(id) ? selectedIds.delete(id) : selectedIds.add(id);
+    }
+    lastClickedId = id;
+    refreshSelectionUI();
+  }
+  function toggleSelectAll(){
+    if(selectedIds.size === cues.length) selectedIds.clear();
+    else selectedIds = new Set(cues.map(c=>c.id));
+    refreshSelectionUI();
+  }
+
+  // ---------- operations ----------
+  function mergeSelected(){
+    if(selectedIds.size < 2) return;
+    const sel = cues.filter(c=>selectedIds.has(c.id)).sort((a,b)=>a.start-b.start);
+    const sep = joinNewline.checked ? "\n" : " ";
+    const merged = {
+      id: nextId++,
+      start: Math.min(...sel.map(c=>c.start)),
+      end:   Math.max(...sel.map(c=>c.end)),
+      text:  sel.map(c=>c.text.trim()).filter(Boolean).join(sep),
+    };
+    const firstIdx = cues.findIndex(c=>selectedIds.has(c.id));
+    cues = cues.filter(c=>!selectedIds.has(c.id));
+    cues.splice(Math.min(firstIdx, cues.length), 0, merged);
+    selectedIds = new Set([merged.id]);
+    lastClickedId = merged.id;
+    render();
+    toast(`Merged ${sel.length} captions into one.`);
+  }
+
+  function splitCue(id, caret){
+    const idx = cues.findIndex(c=>c.id===id);
+    if(idx === -1) return;
+    const c = cues[idx];
+    const text = c.text;
+    let pos = (typeof caret === "number") ? caret : Math.floor(text.length/2);
+    if(pos <= 0 || pos >= text.length) pos = Math.floor(text.length/2);   // avoid empty halves
+    const left = text.slice(0,pos).trim();
+    const right = text.slice(pos).trim();
+    const frac = text.length ? pos/text.length : 0.5;
+    let mid = Math.round(c.start + (c.end - c.start)*frac);
+    mid = Math.min(Math.max(mid, c.start), c.end);
+    const a = { id: nextId++, start:c.start, end:mid,   text:left  };
+    const b = { id: nextId++, start:mid,     end:c.end, text:right };
+    cues.splice(idx, 1, a, b);
+    selectedIds.delete(id);
+    render();
+    toast("Caption split in two.");
+  }
+
+  function deleteCues(ids){
+    const set = new Set(ids);
+    const n = cues.length;
+    cues = cues.filter(c=>!set.has(c.id));
+    ids.forEach(id=>selectedIds.delete(id));
+    render();
+    toast(`Deleted ${n - cues.length} caption${n-cues.length!==1?"s":""}.`);
+  }
+
+  // ---------- import / export ----------
+  function loadFile(file){
+    if(!file) return;
+    if(cues.length && !confirm("Replace the current subtitles with this file?")) return;
+    originalName = file.name.replace(/\.[^.]+$/,"") || "subtitles";
+    fileNameEl.textContent = file.name;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const { cues: parsed, skipped } = parseSRT(String(reader.result));
+      cues = parsed; selectedIds.clear(); lastClickedId = null;
+      render();
+      toast(skipped > 0
+        ? `Loaded ${parsed.length} captions · ${skipped} block(s) skipped (no timing found).`
+        : `Loaded ${parsed.length} captions.`);
+    };
+    reader.onerror = () => toast("Could not read that file.");
+    reader.readAsText(file, "utf-8");
+  }
+  function exportSRT(){
+    if(!cues.length) return;
+    const blob = new Blob([toSRT()], { type:"text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `${originalName}-edited.srt`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast(`Exported ${cues.length} captions.`);
+  }
+
+  // ---------- toast ----------
+  let toastTimer = null;
+  function toast(msg){
+    const el = $("toast");
+    el.textContent = msg; el.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove("show"), 2600);
+  }
+
+  // ---------- wire up ----------
+  $("chooseBtn").addEventListener("click", () => fileInput.click());
+  $("importBtn").addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", e => { loadFile(e.target.files[0]); fileInput.value=""; });
+  exportBtn.addEventListener("click", exportSRT);
+  mergeBtn.addEventListener("click", mergeSelected);
+  deleteSelBtn.addEventListener("click", () => { if(selectedIds.size) deleteCues([...selectedIds]); });
+  selectAllBtn.addEventListener("click", toggleSelectAll);
+
+  // drag & drop anywhere
+  let dragDepth = 0;
+  window.addEventListener("dragenter", e => { e.preventDefault(); dragDepth++; document.body.classList.add("dragging"); });
+  window.addEventListener("dragover",  e => { e.preventDefault(); });
+  window.addEventListener("dragleave", e => { e.preventDefault(); if(--dragDepth<=0) document.body.classList.remove("dragging"); });
+  window.addEventListener("drop", e => {
+    e.preventDefault(); dragDepth=0; document.body.classList.remove("dragging");
+    const f = e.dataTransfer && e.dataTransfer.files[0];
+    if(f) loadFile(f);
+  });
+
+  // keyboard shortcuts (ignored while typing in a field, except ⌘/Ctrl+S)
+  const isEditing = () => { const a=document.activeElement; return a && (a.tagName==="TEXTAREA" || a.tagName==="INPUT"); };
+  window.addEventListener("keydown", e => {
+    const mod = e.metaKey || e.ctrlKey;
+    if(mod && e.key.toLowerCase()==="s"){ e.preventDefault(); exportSRT(); return; }
+    if(isEditing()) return;
+    if(mod && e.key.toLowerCase()==="a"){ e.preventDefault(); if(cues.length){ selectedIds=new Set(cues.map(c=>c.id)); refreshSelectionUI(); } return; }
+    if((e.key==="m"||e.key==="M") && selectedIds.size>=2){ e.preventDefault(); mergeSelected(); }
+    else if((e.key==="Delete"||e.key==="Backspace") && selectedIds.size){ e.preventDefault(); deleteCues([...selectedIds]); }
+    else if(e.key==="Escape"){ selectedIds.clear(); refreshSelectionUI(); }
+  });
+
+  render();   // initial (empty) paint
+})();
+</script>
+</body>
+</html>
