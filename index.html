@@ -201,7 +201,8 @@
           <div id="list"></div>
           <div class="hint">
             Click a caption (or checkbox) to select · <kbd>Shift</kbd>+click range ·
-            <kbd>M</kbd> merge · <kbd>Del</kbd> delete · <kbd>Space</kbd> play/pause ·
+            <kbd>N</kbd> prev subtitle · <kbd>M</kbd> next subtitle (or merge if 2+ selected) ·
+            <kbd>Del</kbd> delete · <kbd>Space</kbd> play/pause ·
             click a <b style="color:var(--accent)">caption number</b> to jump the video there
           </div>
         </div>
@@ -707,6 +708,22 @@ ${ps}
     player.currentTime = Math.max(0, ms/1000);
     player.play().catch(()=>{});
   }
+  function seekToCue(dir){
+    if(!hasVideo || !cues.length) return;
+    const t = player.currentTime * 1000;
+    let target;
+    if(dir === "next"){
+      // first cue that starts after current time (100ms buffer to skip current)
+      target = cues.find(c => c.start > t + 100);
+    } else {
+      // last cue that starts before current time (500ms buffer so pressing prev twice goes back two)
+      const candidates = cues.filter(c => c.start < t - 500);
+      target = candidates[candidates.length - 1];
+      // if none found (already at/before first cue), jump to very first
+      if(!target) target = cues[0];
+    }
+    if(target) seekTo(target.start);
+  }
   function setTimeFromPlayhead(which){
     if(!hasVideo || selectedIds.size !== 1) return;
     const c = cues.find(x => x.id === [...selectedIds][0]);
@@ -846,7 +863,11 @@ ${ps}
     if(mod && (e.key.toLowerCase()==="y" || (e.shiftKey && e.key.toLowerCase()==="z"))){ e.preventDefault(); redo(); return; }
     if(e.key===" " && hasVideo){ e.preventDefault(); player.paused ? player.play() : player.pause(); return; }
     if(mod && e.key.toLowerCase()==="a"){ e.preventDefault(); if(cues.length){ selectedIds=new Set(cues.map(c=>c.id)); refreshSelectionUI(); } return; }
-    if((e.key==="m"||e.key==="M") && selectedIds.size>=2){ e.preventDefault(); mergeSelected(); }
+    if(e.key==="n"||e.key==="N"){ e.preventDefault(); seekToCue("prev"); }
+    else if(e.key==="m"||e.key==="M"){
+      e.preventDefault();
+      if(selectedIds.size >= 2) mergeSelected(); else seekToCue("next");
+    }
     else if((e.key==="Delete"||e.key==="Backspace") && selectedIds.size){ e.preventDefault(); deleteCues([...selectedIds]); }
     else if(e.key==="Escape"){ selectedIds.clear(); refreshSelectionUI(); }
   });
