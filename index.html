@@ -859,14 +859,16 @@ ${ps}
   window.addEventListener("keydown", e => {
     const mod = e.metaKey || e.ctrlKey;
     if(mod && e.key.toLowerCase()==="s"){ e.preventDefault(); exportFile(); return; }
+    // Q and I always open file pickers regardless of focus
+    if(e.key==="q"||e.key==="Q"){ e.preventDefault(); videoInput.click(); return; }
+    if(e.key==="i"||e.key==="I"){ e.preventDefault(); fileInput.click(); return; }
+    // rest of shortcuts are blocked while typing in a text/input field
     if(isEditing()) return;
     if(mod && e.key.toLowerCase()==="z" && !e.shiftKey){ e.preventDefault(); undo(); return; }
     if(mod && (e.key.toLowerCase()==="y" || (e.shiftKey && e.key.toLowerCase()==="z"))){ e.preventDefault(); redo(); return; }
     if(e.key===" " && hasVideo){ e.preventDefault(); player.paused ? player.play() : player.pause(); return; }
     if(mod && e.key.toLowerCase()==="a"){ e.preventDefault(); if(cues.length){ selectedIds=new Set(cues.map(c=>c.id)); refreshSelectionUI(); } return; }
-    if(e.key==="q"||e.key==="Q"){ e.preventDefault(); videoInput.click(); }
-    else if(e.key==="i"||e.key==="I"){ e.preventDefault(); fileInput.click(); }
-    else if(e.key==="n"||e.key==="N"){ e.preventDefault(); seekToCue("prev"); }
+    if(e.key==="n"||e.key==="N"){ e.preventDefault(); seekToCue("prev"); }
     else if(e.key==="m"||e.key==="M"){
       e.preventDefault();
       if(selectedIds.size >= 2) mergeSelected(); else seekToCue("next");
