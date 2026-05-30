@@ -202,7 +202,7 @@
         <div id="listWrap">
           <div id="list"></div>
           <div class="hint">
-            Click a caption (or checkbox) to select · <kbd>Shift</kbd>+click range ·
+            Click to select · <b>drag across captions</b> to select many · <kbd>Shift</kbd>+click range ·
             <kbd>Q</kbd> load video · <kbd>I</kbd> import subtitles ·
             <kbd>S</kbd> loop current subtitle · <kbd>N</kbd> prev · <kbd>M</kbd> next (or merge if 2+ selected) ·
             <kbd>Del</kbd> delete · <kbd>Space</kbd> play/pause ·
@@ -235,6 +235,10 @@
   let activeCueId = null;
   let loopCueId = null;   // id of caption being looped, or null
   let rafId = 0;
+  // drag-to-select
+  let dragSel = null;     // active drag-selection gesture, or null
+  let dragRaf = 0;        // edge auto-scroll animation frame
+  let justDragged = false;// suppresses the click right after a drag
   // undo / redo history
   const undoStack = [];
   const redoStack = [];
@@ -451,6 +455,7 @@ ${ps}
     row.className = "row" + (selectedIds.has(c.id) ? " selected" : "") + (hasVideo ? " canseek" : "");
     row.dataset.id = c.id;
     row.addEventListener("click", (e) => {
+      if(justDragged){ justDragged = false; return; }
       if(e.target.closest("textarea, input.tc, button, .num")) return;
       toggleSelect(c.id, e);
     });
@@ -462,6 +467,7 @@ ${ps}
     num.className="num"; num.textContent = idx+1;
     num.title = hasVideo ? "Click to jump the video here" : "";
     num.addEventListener("click", (e) => {
+      if(justDragged){ justDragged = false; return; }
       if(hasVideo) seekTo(c.start);
       else toggleSelect(c.id, e);
     });
@@ -875,6 +881,81 @@ ${ps}
   setEndBtn.addEventListener("click", () => setTimeFromPlayhead("end"));
   undoBtn.addEventListener("click", undo);
   redoBtn.addEventListener("click", redo);
+
+  // ---------- drag-to-select (sweep the mouse over captions) ----------
+  function rowIdxFromPoint(x, y){
+    const el = document.elementFromPoint(x, y);
+    const row = el && el.closest ? el.closest(".row") : null;
+    if(!row || !listEl.contains(row)) return -1;
+    return cues.findIndex(c => c.id === +row.dataset.id);
+  }
+  function applyDragRange(idx){
+    if(idx < 0 || !dragSel) return;
+    const lo = Math.min(dragSel.anchorIdx, idx), hi = Math.max(dragSel.anchorIdx, idx);
+    const next = new Set(dragSel.base);
+    for(let i=lo;i<=hi;i++) next.add(cues[i].id);
+    selectedIds = next;
+    lastClickedId = cues[idx].id;
+    refreshSelectionUI();
+  }
+  function dragAutoScroll(){
+    if(!dragSel || !dragSel.active){ dragRaf = 0; return; }
+    const margin = 80, speed = 16, h = window.innerHeight;
+    let dy = 0;
+    if(dragSel.lastY < margin) dy = -speed;
+    else if(dragSel.lastY > h - margin) dy = speed;
+    if(dy){
+      window.scrollBy(0, dy);
+      applyDragRange(rowIdxFromPoint(dragSel.lastX, dragSel.lastY));
+    }
+    dragRaf = requestAnimationFrame(dragAutoScroll);
+  }
+  listEl.addEventListener("mousedown", (e) => {
+    if(e.button !== 0) return;
+    if(e.target.closest("input.sel")) return;          // checkbox keeps its plain toggle
+    const row = e.target.closest(".row");
+    if(!row) return;
+    const idx = cues.findIndex(c => c.id === +row.dataset.id);
+    if(idx < 0) return;
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    dragSel = {
+      anchorIdx: idx,
+      base: additive ? new Set(selectedIds) : new Set(),
+      active: false,
+      onEditable: !!e.target.closest("textarea, input.tc, button"),
+      startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY
+    };
+  });
+  document.addEventListener("mousemove", (e) => {
+    if(!dragSel) return;
+    dragSel.lastX = e.clientX; dragSel.lastY = e.clientY;
+    if(!dragSel.active){
+      if(Math.abs(e.clientX-dragSel.startX) + Math.abs(e.clientY-dragSel.startY) <= 6) return;
+      const idxNow = rowIdxFromPoint(e.clientX, e.clientY);
+      if(idxNow < 0) return;
+      // starting inside a caption's text: let the user select text within it;
+      // only switch to row-select once the pointer moves to a DIFFERENT caption
+      if(dragSel.onEditable && idxNow === dragSel.anchorIdx) return;
+      dragSel.active = true;
+      const a = document.activeElement; if(dragSel.onEditable && a && a.blur) a.blur();
+      const s = window.getSelection && window.getSelection(); if(s) s.removeAllRanges();
+      document.body.style.userSelect = "none";
+      if(!dragRaf) dragRaf = requestAnimationFrame(dragAutoScroll);
+    }
+    if(dragSel.active){
+      e.preventDefault();
+      applyDragRange(rowIdxFromPoint(e.clientX, e.clientY));
+    }
+  });
+  document.addEventListener("mouseup", () => {
+    if(!dragSel) return;
+    const wasActive = dragSel.active;
+    dragSel = null;
+    document.body.style.userSelect = "";
+    if(dragRaf){ cancelAnimationFrame(dragRaf); dragRaf = 0; }
+    // suppress the click that fires right after a drag, then re-sync checkbox visuals
+    if(wasActive){ justDragged = true; setTimeout(() => { justDragged = false; refreshSelectionUI(); }, 0); }
+  });
 
   // video playback → sync (rAF while playing for smoothness, events otherwise)
   function tick(){ if(!player.paused && !player.ended){ updateSync(); rafId = requestAnimationFrame(tick); } }
