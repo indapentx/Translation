@@ -105,6 +105,7 @@
   }
   .row.selected{background:var(--sel); border-color:var(--sel-border)}
   .row.active{outline:2px solid var(--good); outline-offset:-2px}
+  .row.looping{outline:2px solid #f59e0b; outline-offset:-2px; background:#1e1a0e}
   .row .sel{width:17px; height:17px; margin-top:7px; accent-color:var(--accent); cursor:pointer}
   .row .num{font-variant-numeric:tabular-nums; color:var(--muted); font-weight:600;
     padding-top:6px; text-align:right; cursor:pointer; user-select:none}
@@ -192,6 +193,7 @@
               <input type="checkbox" id="followChk" checked> Follow playback
             </label>
             <span class="spacer"></span>
+            <span id="loopBadge" style="display:none;color:#f59e0b;font-size:12.5px;font-weight:600">🔁 Looping</span>
             <button id="setStartBtn" class="small" disabled title="Set the selected caption's START to the current video time">⇤ Set start</button>
             <button id="setEndBtn" class="small" disabled title="Set the selected caption's END to the current video time">Set end ⇥</button>
           </div>
@@ -202,7 +204,7 @@
           <div class="hint">
             Click a caption (or checkbox) to select · <kbd>Shift</kbd>+click range ·
             <kbd>Q</kbd> load video · <kbd>I</kbd> import subtitles ·
-            <kbd>N</kbd> prev subtitle · <kbd>M</kbd> next subtitle (or merge if 2+ selected) ·
+            <kbd>S</kbd> loop current subtitle · <kbd>N</kbd> prev · <kbd>M</kbd> next (or merge if 2+ selected) ·
             <kbd>Del</kbd> delete · <kbd>Space</kbd> play/pause ·
             click a <b style="color:var(--accent)">caption number</b> to jump the video there
           </div>
@@ -231,6 +233,7 @@
   let videoURL = null;
   let hasVideo = false;
   let activeCueId = null;
+  let loopCueId = null;   // id of caption being looped, or null
   let rafId = 0;
   // undo / redo history
   const undoStack = [];
@@ -685,8 +688,44 @@ ${ps}
   }
   const isEditingInList = () => { const a=document.activeElement; return a && listEl.contains(a); };
 
+  function toggleLoop(){
+    if(!hasVideo) return;
+    if(loopCueId !== null){
+      loopCueId = null;
+      updateLoopUI();
+      toast("Loop kapatıldı.");
+    } else {
+      const c = currentCue();
+      if(!c){ toast("Şu an oynayan bir altyazı yok."); return; }
+      loopCueId = c.id;
+      seekTo(c.start);
+      updateLoopUI();
+      toast(`🔁 "${c.text.slice(0,40)}${c.text.length>40?"…":""}" loopta.`);
+    }
+  }
+  function updateLoopUI(){
+    const badge = document.getElementById("loopBadge");
+    listEl.querySelectorAll(".row.looping").forEach(r => r.classList.remove("looping"));
+    if(loopCueId !== null){
+      badge.style.display = "";
+      const row = listEl.querySelector('.row[data-id="'+loopCueId+'"]');
+      if(row) row.classList.add("looping");
+    } else {
+      badge.style.display = "none";
+    }
+  }
+
   function updateSync(opts){
     if(!hasVideo) return;
+    // loop check — seek back to cue start when playhead hits the end
+    if(loopCueId !== null){
+      const lc = cues.find(c => c.id === loopCueId);
+      if(!lc){ loopCueId = null; updateLoopUI(); }
+      else if(player.currentTime * 1000 >= lc.end - 30){
+        player.currentTime = lc.start / 1000;
+        return;
+      }
+    }
     const scroll = !opts || opts.scroll !== false;
     const c = currentCue();
     const id = c ? c.id : null;
@@ -871,6 +910,7 @@ ${ps}
     if(mod && (e.key.toLowerCase()==="y" || (e.shiftKey && e.key.toLowerCase()==="z"))){ e.preventDefault(); redo(); return; }
     if(e.key===" " && hasVideo){ e.preventDefault(); player.paused ? player.play() : player.pause(); return; }
     if(mod && e.key.toLowerCase()==="a"){ e.preventDefault(); if(cues.length){ selectedIds=new Set(cues.map(c=>c.id)); refreshSelectionUI(); } return; }
+    if(e.key==="s"||e.key==="S"){ e.preventDefault(); toggleLoop(); return; }
     if(e.key==="n"||e.key==="N"){ e.preventDefault(); seekToCue("prev"); }
     else if(e.key==="m"||e.key==="M"){
       e.preventDefault();
