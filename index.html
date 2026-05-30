@@ -71,8 +71,8 @@
   .video-wrap{position:relative; width:100%; background:#000; border:1px solid var(--border);
     border-radius:12px; overflow:hidden}
   #player{display:block; width:100%; aspect-ratio:16/9; object-fit:contain; background:#000}
-  #subOverlay{position:absolute; left:0; right:0; bottom:7%; text-align:center;
-    pointer-events:none; padding:0 14px; font-size:16px; line-height:1.5}
+  #subOverlay{position:absolute; left:0; right:0; bottom:13%; text-align:center;
+    pointer-events:none; padding:0 14px; font-size:16px; line-height:1.5; z-index:2}
   #subOverlay span{display:inline; background:rgba(0,0,0,.74); color:#fff; font-weight:500;
     padding:.12em .42em; border-radius:4px; box-decoration-break:clone; -webkit-box-decoration-break:clone}
   .video-controls{display:flex; flex-wrap:wrap; gap:8px 10px; align-items:center;
@@ -623,8 +623,8 @@ ${ps}
     const firstIdx = cues.findIndex(c=>selectedIds.has(c.id));
     cues = cues.filter(c=>!selectedIds.has(c.id));
     cues.splice(Math.min(firstIdx, cues.length), 0, merged);
-    selectedIds = new Set([merged.id]);
-    lastClickedId = merged.id;
+    selectedIds.clear();
+    lastClickedId = null;
     render();
     toast(`Merged ${sel.length} captions into one.`);
   }
@@ -658,7 +658,8 @@ ${ps}
       { id: nextId++, start:c.start, end:mid,   text:left  },
       { id: nextId++, start:mid,     end:c.end, text:right }
     );
-    selectedIds.delete(id);
+    selectedIds.clear();
+    lastClickedId = null;
     render();
     toast("Caption split in two.");
   }
@@ -668,7 +669,8 @@ ${ps}
     const set = new Set(ids);
     const n = cues.length;
     cues = cues.filter(c=>!set.has(c.id));
-    ids.forEach(id=>selectedIds.delete(id));
+    selectedIds.clear();
+    lastClickedId = null;
     render();
     toast(`Deleted ${n - cues.length} caption${n-cues.length!==1?"s":""}.`);
   }
