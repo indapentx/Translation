@@ -19,11 +19,17 @@
   }
   /* ---------- header ---------- */
   header{
-    position:sticky; top:0; z-index:20; display:flex; align-items:center; gap:14px;
+    position:sticky; top:0; z-index:20; display:flex; align-items:center; gap:12px;
     padding:12px 20px; background:var(--panel); border-bottom:1px solid var(--border);
   }
   .brand{font-weight:700; font-size:16px; letter-spacing:.2px; margin-right:auto}
   .brand .dot{color:var(--accent)}
+  /* format toggle */
+  .fmtwrap{display:flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; flex-shrink:0}
+  .fmt{border:none; border-radius:0; padding:6px 11px; background:transparent; color:var(--muted);
+    font-size:12.5px; cursor:pointer; transition:.12s; font:inherit}
+  .fmt.active{background:var(--accent); color:#fff}
+  .fmt:hover:not(.active){background:var(--panel-2); color:var(--text)}
   /* ---------- buttons ---------- */
   button{
     font:inherit; color:var(--text); background:var(--panel-2); border:1px solid var(--border);
@@ -109,7 +115,12 @@
 <body>
   <header>
     <div class="brand">🎬 Subtitle Editor<span class="dot">.</span></div>
-    <button id="importBtn">Import .srt</button>
+    <button id="importBtn">Import file</button>
+    <!-- export format toggle: shown once a file is loaded -->
+    <div class="fmtwrap" id="fmtWrap" style="display:none">
+      <button class="fmt" id="fmtSRT">SRT</button>
+      <button class="fmt" id="fmtITT">iTT</button>
+    </div>
     <button id="exportBtn" class="primary" disabled>Export .srt</button>
   </header>
 
@@ -118,8 +129,8 @@
     <section id="empty">
       <div class="big">🎬</div>
       <h1>Drop a subtitle file to start</h1>
-      <p>Import an <b>.srt</b> file, then select captions and merge, split, edit or delete them.</p>
-      <button id="chooseBtn" class="primary">Choose .srt file…</button>
+      <p>Import an <b>.srt</b> or <b>.iTT</b> file, then select captions and merge, split, edit or delete them.</p>
+      <button id="chooseBtn" class="primary">Choose file…</button>
     </section>
 
     <!-- editor -->
@@ -144,7 +155,7 @@
     </section>
   </main>
 
-  <input type="file" id="fileInput" accept=".srt,.txt,text/plain" hidden>
+  <input type="file" id="fileInput" accept=".srt,.txt,.itt,text/plain,application/xml" hidden>
   <div id="toast"></div>
 
 <script>
@@ -156,6 +167,11 @@
   let nextId = 1;
   let originalName = "subtitles";
   let lastClickedId = null;      // anchor for shift-click range
+  let sourceFormat = "srt";      // "srt" | "itt"
+  let exportFormat = "srt";      // "srt" | "itt"
+  let ittMeta = null;            // iTT header info (frameRate, etc.)
+
+  const DEFAULT_ITT_META = { frameRate:60, multiplierNum:1000, multiplierDen:1001, dropMode:"nonDrop", lang:"en" };
 
   // ---------- element refs ----------
   const $ = (id) => document.getElementById(id);
@@ -164,9 +180,11 @@
   const fileNameEl=$("fileName"), totalCountEl=$("totalCount"), selCountEl=$("selCount");
   const mergeBtn=$("mergeBtn"), deleteSelBtn=$("deleteSelBtn"), selectAllBtn=$("selectAllBtn");
   const exportBtn=$("exportBtn"), joinNewline=$("joinNewline");
+  const fmtWrap=$("fmtWrap"), fmtSRTBtn=$("fmtSRT"), fmtITTBtn=$("fmtITT");
 
-  // ---------- time helpers ----------
+  // ---------- SRT time helpers ----------
   const pad = (n,len) => String(n).padStart(len,"0");
+
   function timecodeToMs(tc){
     const m = String(tc).trim().match(/^(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})$/);
     if(!m) return null;
@@ -181,6 +199,73 @@
   }
   function durLabel(ms){ return (ms/1000).toFixed(2)+"s"; }
 
+  // ---------- SMPTE (iTT) time helpers ----------
+  // HH:MM:SS:FF  (frame separator can be : or ;)
+  const SMPTE_RE = /^(\d{1,2}):(\d{2}):(\d{2})[:;](\d{1,2})$/;
+
+  function smpteToMs(tc, meta){
+    const { frameRate, multiplierNum, multiplierDen, dropMode } = meta;
+    const m = String(tc).trim().match(SMPTE_RE);
+    if(!m) return null;
+    const H=+m[1], M=+m[2], S=+m[3], F=+m[4];
+    let frameCount;
+    if(dropMode === "drop"){
+      // Frames dropped per minute boundary: 2 for 29.97, 4 for 59.94
+      const D = Math.round(frameRate * 2 / 30);
+      frameCount = frameRate*3600*H + frameRate*60*M - D*(M - Math.floor(M/10)) + frameRate*S + F;
+    } else {
+      frameCount = (H*3600 + M*60 + S)*frameRate + F;
+    }
+    return Math.round(frameCount * multiplierDen * 1000 / (frameRate * multiplierNum));
+  }
+
+  function msToSmpte(ms, meta){
+    const { frameRate, multiplierNum, multiplierDen, dropMode } = meta;
+    ms = Math.max(0, ms);
+
+    if(dropMode === "drop"){
+      // ms → effective frame count → drop-frame timecode labels
+      const effectiveFps = frameRate * multiplierNum / multiplierDen;
+      const totalFrames  = Math.round(ms / 1000 * effectiveFps);
+      const D = Math.round(frameRate * 2 / 30);          // dropped frames/minute
+      const framesPerMin   = frameRate * 60 - D;
+      const framesPer10min = frameRate * 600 - D * 9;
+      const framesPerHour  = frameRate * 3600 - D * 54;
+
+      const H = Math.floor(totalFrames / framesPerHour);
+      let rem = totalFrames % framesPerHour;
+      const d10 = Math.floor(rem / framesPer10min);
+      rem = rem % framesPer10min;
+
+      let M, S, F;
+      if(rem < frameRate * 60){
+        // First minute of each 10-min block: no drop
+        M = d10 * 10;
+        S = Math.floor(rem / frameRate);
+        F = rem % frameRate;
+      } else {
+        rem -= frameRate * 60;
+        const m1 = Math.min(Math.floor(rem / framesPerMin) + 1, 9);
+        rem = rem % framesPerMin;
+        M = d10 * 10 + m1;
+        const fi = rem + D;  // skipped frame labels added back
+        S = Math.floor(fi / frameRate);
+        F = fi % frameRate;
+      }
+      return `${pad(H,2)}:${pad(M,2)}:${pad(S,2)}:${pad(F,2)}`;
+    } else {
+      // Non-drop: ms → nominal frame count → HH:MM:SS:FF
+      const nomFrames = Math.round(ms * frameRate * multiplierNum / (multiplierDen * 1000));
+      const F  = nomFrames % frameRate;
+      const ts = Math.floor(nomFrames / frameRate);
+      const S  = ts % 60;
+      const tm = Math.floor(ts / 60);
+      const M  = tm % 60;
+      const H  = Math.floor(tm / 60);
+      return `${pad(H,2)}:${pad(M,2)}:${pad(S,2)}:${pad(F,2)}`;
+    }
+  }
+
   // ---------- SRT parse / serialize ----------
   const TIME_RE = /(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})/;
   function parseSRT(text){
@@ -191,7 +276,7 @@
       const block = raw.replace(/^\n+|\n+$/g,"");
       if(!block.trim()) continue;
       const lines = block.split("\n");
-      const ti = lines.findIndex(l => TIME_RE.test(l));   // tolerate missing/extra index lines
+      const ti = lines.findIndex(l => TIME_RE.test(l));
       if(ti === -1){ skipped++; continue; }
       const m = lines[ti].match(TIME_RE);
       const start = ((+m[1])*3600+(+m[2])*60+(+m[3]))*1000 + (+m[4].padEnd(3,"0"));
@@ -206,18 +291,98 @@
     ).join("\n\n") + "\n";
   }
 
+  // ---------- iTT parse / serialize ----------
+  // iTT is Apple's TTML-based format with SMPTE frame timecodes.
+  function ittGetAttr(el, localName, def=""){
+    // Try namespace-aware first, then prefixed fallback
+    const NS = "http://www.w3.org/ns/ttml#parameter";
+    return el.getAttributeNS(NS, localName)
+        || el.getAttribute("ttp:" + localName)
+        || el.getAttribute(localName)
+        || def;
+  }
+
+  function parseITT(xmlText){
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xmlText, "text/xml");
+    if(doc.querySelector("parsererror")){
+      return { cues:[], skipped:0, meta:null, error:"XML parse error" };
+    }
+    const tt = doc.documentElement;
+    const frameRate = parseInt(ittGetAttr(tt,"frameRate","30")) || 30;
+    const mulStr    = ittGetAttr(tt,"frameRateMultiplier","1 1").split(/\s+/);
+    const multiplierNum = parseInt(mulStr[0]) || 1;
+    const multiplierDen = parseInt(mulStr[1]) || 1;
+    const dropMode  = (ittGetAttr(tt,"dropMode","nonDrop")).toLowerCase();
+    const lang      = tt.getAttribute("xml:lang") || "en";
+    const meta = { frameRate, multiplierNum, multiplierDen, dropMode, lang };
+
+    const ps = doc.querySelectorAll("p");
+    const out = []; let skipped = 0;
+    ps.forEach(p => {
+      const begin = p.getAttribute("begin");
+      const end   = p.getAttribute("end");
+      if(!begin || !end){ skipped++; return; }
+      const startMs = smpteToMs(begin, meta);
+      const endMs   = smpteToMs(end,   meta);
+      if(startMs === null || endMs === null){ skipped++; return; }
+      const text = p.textContent.trim();
+      if(!text){ skipped++; return; }
+      out.push({ id: nextId++, start: startMs, end: endMs, text });
+    });
+    return { cues: out, skipped, meta };
+  }
+
+  function toITT(){
+    const meta = ittMeta || DEFAULT_ITT_META;
+    const { frameRate, multiplierNum, multiplierDen, dropMode, lang } = meta;
+    const xmlEsc = s => s
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    const ps = cues.map(c => {
+      const begin = msToSmpte(c.start, meta);
+      const end   = msToSmpte(c.end,   meta);
+      return `      <p begin="${begin}" end="${end}" region="bottom">${xmlEsc(c.text)}</p>`;
+    }).join("\n");
+    return `<?xml version="1.0"?>
+<tt xmlns:vt="http://namespace.itunes.apple.com/itt/ttml-extension#vertical"
+    xmlns:ttp="http://www.w3.org/ns/ttml#parameter"
+    xmlns:tts="http://www.w3.org/ns/ttml#styling"
+    xmlns:ttm="http://www.w3.org/ns/ttml#metadata"
+    xmlns="http://www.w3.org/ns/ttml"
+    xml:lang="${lang}"
+    ttp:dropMode="${dropMode}"
+    ttp:frameRate="${frameRate}"
+    ttp:frameRateMultiplier="${multiplierNum} ${multiplierDen}"
+    ttp:timeBase="smpte">
+  <head>
+    <styling>
+      <style xml:id="normal" tts:color="white" tts:fontFamily="sansSerif" tts:fontSize="100%" tts:fontStyle="normal" tts:fontWeight="normal"/>
+    </styling>
+    <layout>
+      <region xml:id="bottom" tts:displayAlign="after" tts:extent="100% 15%" tts:origin="0% 85%" tts:writingMode="lrtb"/>
+    </layout>
+  </head>
+  <body tts:color="white" region="bottom" style="normal">
+    <div>
+${ps}
+    </div>
+  </body>
+</tt>
+`;
+  }
+
   // ---------- rendering ----------
   function render(){
     const has = cues.length > 0;
     emptyEl.style.display = has ? "none" : "";
     editorEl.style.display = has ? "" : "none";
     exportBtn.disabled = !has;
+    fmtWrap.style.display = has ? "" : "none";
     if(!has){ updateToolbar(); return; }
 
     const frag = document.createDocumentFragment();
     cues.forEach((c,idx) => frag.appendChild(buildRow(c,idx)));
     listEl.replaceChildren(frag);
-    // textareas need to be in the DOM before measuring their height
     listEl.querySelectorAll("textarea.text").forEach(autoGrow);
     updateToolbar();
   }
@@ -226,28 +391,24 @@
     const row = document.createElement("div");
     row.className = "row" + (selectedIds.has(c.id) ? " selected" : "");
     row.dataset.id = c.id;
-    // selecting by clicking the row, except on the editable controls / buttons
     row.addEventListener("click", (e) => {
       if(e.target.closest("textarea, input.tc, button")) return;
       toggleSelect(c.id, e);
     });
 
-    // checkbox
     const cb = document.createElement("input");
     cb.type="checkbox"; cb.className="sel"; cb.checked=selectedIds.has(c.id);
 
-    // number
     const num = document.createElement("div");
     num.className="num"; num.textContent = idx+1;
 
-    // times (start over end) + duration
     const times = document.createElement("div");
     times.className="times";
     const startIn = mkTc(c,"start"), endIn = mkTc(c,"end");
     const dur = document.createElement("div");
     dur.className="dur"; dur.textContent = durLabel(c.end - c.start);
     times.append(startIn, endIn, dur);
-    // keep start<end consistent and refresh duration after either edit
+
     function commit(which, inp){
       const ms = timecodeToMs(inp.value);
       if(ms === null){ inp.classList.add("bad"); return; }
@@ -264,20 +425,19 @@
       if(e.key==="Enter"){ e.preventDefault(); inp.blur(); }
     }));
 
-    // text
-    let caret = null;   // remember caret so Split knows where to cut
+    let caret = null;
     const ta = document.createElement("textarea");
     ta.className="text"; ta.value=c.text; ta.spellcheck=false; ta.rows=1;
     ta.addEventListener("input", () => { c.text = ta.value; autoGrow(ta); });
     ["keyup","click","select"].forEach(ev =>
       ta.addEventListener(ev, () => { caret = ta.selectionStart; }));
 
-    // actions
     const actions = document.createElement("div");
     actions.className="actions";
-    const splitBtn = mkBtn("Split","small",() => splitCue(c.id, caret));
-    const delBtn   = mkBtn("Delete","small danger",() => deleteCues([c.id]));
-    actions.append(splitBtn, delBtn);
+    actions.append(
+      mkBtn("Split","small",() => splitCue(c.id, caret)),
+      mkBtn("Delete","small danger",() => deleteCues([c.id]))
+    );
 
     row.append(cb, num, times, ta, actions);
     return row;
@@ -308,7 +468,6 @@
       (cues.length && selectedIds.size === cues.length) ? "Select none" : "Select all";
   }
 
-  // lightweight selection refresh (no full rebuild → keeps textareas/scroll intact)
   function refreshSelectionUI(){
     listEl.querySelectorAll(".row").forEach(row => {
       const on = selectedIds.has(+row.dataset.id);
@@ -316,6 +475,14 @@
       row.querySelector(".sel").checked = on;
     });
     updateToolbar();
+  }
+
+  // ---------- format toggle UI ----------
+  function setExportFormat(fmt){
+    exportFormat = fmt;
+    fmtSRTBtn.classList.toggle("active", fmt === "srt");
+    fmtITTBtn.classList.toggle("active", fmt === "itt");
+    exportBtn.textContent = fmt === "itt" ? "Export .iTT" : "Export .srt";
   }
 
   // ---------- selection ----------
@@ -363,15 +530,16 @@
     const c = cues[idx];
     const text = c.text;
     let pos = (typeof caret === "number") ? caret : Math.floor(text.length/2);
-    if(pos <= 0 || pos >= text.length) pos = Math.floor(text.length/2);   // avoid empty halves
+    if(pos <= 0 || pos >= text.length) pos = Math.floor(text.length/2);
     const left = text.slice(0,pos).trim();
     const right = text.slice(pos).trim();
     const frac = text.length ? pos/text.length : 0.5;
     let mid = Math.round(c.start + (c.end - c.start)*frac);
     mid = Math.min(Math.max(mid, c.start), c.end);
-    const a = { id: nextId++, start:c.start, end:mid,   text:left  };
-    const b = { id: nextId++, start:mid,     end:c.end, text:right };
-    cues.splice(idx, 1, a, b);
+    cues.splice(idx, 1,
+      { id: nextId++, start:c.start, end:mid,   text:left  },
+      { id: nextId++, start:mid,     end:c.end, text:right }
+    );
     selectedIds.delete(id);
     render();
     toast("Caption split in two.");
@@ -392,27 +560,60 @@
     if(cues.length && !confirm("Replace the current subtitles with this file?")) return;
     originalName = file.name.replace(/\.[^.]+$/,"") || "subtitles";
     fileNameEl.textContent = file.name;
+
+    const ext = (file.name.split(".").pop() || "").toLowerCase();
+    const isITT = (ext === "itt");
+
     const reader = new FileReader();
     reader.onload = () => {
-      const { cues: parsed, skipped } = parseSRT(String(reader.result));
+      const raw = String(reader.result);
+      let parsed, skippedCount, meta = null;
+
+      if(isITT){
+        const result = parseITT(raw);
+        if(result.error){ toast("Error: " + result.error); return; }
+        parsed = result.cues; skippedCount = result.skipped; meta = result.meta;
+      } else {
+        const result = parseSRT(raw);
+        parsed = result.cues; skippedCount = result.skipped;
+      }
+
       cues = parsed; selectedIds.clear(); lastClickedId = null;
+      sourceFormat = isITT ? "itt" : "srt";
+      ittMeta = meta;
+      setExportFormat(sourceFormat);
       render();
-      toast(skipped > 0
-        ? `Loaded ${parsed.length} captions · ${skipped} block(s) skipped (no timing found).`
-        : `Loaded ${parsed.length} captions.`);
+
+      const fmt = isITT
+        ? `(${meta.frameRate}fps ${meta.dropMode === "drop" ? "DF" : "NDF"}, ${meta.lang})`
+        : "";
+      toast(skippedCount > 0
+        ? `Loaded ${parsed.length} captions ${fmt}· ${skippedCount} block(s) skipped.`
+        : `Loaded ${parsed.length} captions. ${fmt}`);
     };
     reader.onerror = () => toast("Could not read that file.");
     reader.readAsText(file, "utf-8");
   }
-  function exportSRT(){
+
+  function exportFile(){
     if(!cues.length) return;
-    const blob = new Blob([toSRT()], { type:"text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `${originalName}-edited.srt`;
+    let content, filename, mime;
+    if(exportFormat === "itt"){
+      content  = toITT();
+      filename = `${originalName}-edited.itt`;
+      mime     = "application/xml;charset=utf-8";
+    } else {
+      content  = toSRT();
+      filename = `${originalName}-edited.srt`;
+      mime     = "text/plain;charset=utf-8";
+    }
+    const blob = new Blob([content], { type: mime });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = filename;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    toast(`Exported ${cues.length} captions.`);
+    toast(`Exported ${cues.length} captions as ${exportFormat.toUpperCase()}.`);
   }
 
   // ---------- toast ----------
@@ -421,17 +622,19 @@
     const el = $("toast");
     el.textContent = msg; el.classList.add("show");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.remove("show"), 2600);
+    toastTimer = setTimeout(() => el.classList.remove("show"), 2800);
   }
 
   // ---------- wire up ----------
   $("chooseBtn").addEventListener("click", () => fileInput.click());
   $("importBtn").addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", e => { loadFile(e.target.files[0]); fileInput.value=""; });
-  exportBtn.addEventListener("click", exportSRT);
+  exportBtn.addEventListener("click", exportFile);
   mergeBtn.addEventListener("click", mergeSelected);
   deleteSelBtn.addEventListener("click", () => { if(selectedIds.size) deleteCues([...selectedIds]); });
   selectAllBtn.addEventListener("click", toggleSelectAll);
+  fmtSRTBtn.addEventListener("click", () => setExportFormat("srt"));
+  fmtITTBtn.addEventListener("click", () => setExportFormat("itt"));
 
   // drag & drop anywhere
   let dragDepth = 0;
@@ -444,11 +647,11 @@
     if(f) loadFile(f);
   });
 
-  // keyboard shortcuts (ignored while typing in a field, except ⌘/Ctrl+S)
+  // keyboard shortcuts
   const isEditing = () => { const a=document.activeElement; return a && (a.tagName==="TEXTAREA" || a.tagName==="INPUT"); };
   window.addEventListener("keydown", e => {
     const mod = e.metaKey || e.ctrlKey;
-    if(mod && e.key.toLowerCase()==="s"){ e.preventDefault(); exportSRT(); return; }
+    if(mod && e.key.toLowerCase()==="s"){ e.preventDefault(); exportFile(); return; }
     if(isEditing()) return;
     if(mod && e.key.toLowerCase()==="a"){ e.preventDefault(); if(cues.length){ selectedIds=new Set(cues.map(c=>c.id)); refreshSelectionUI(); } return; }
     if((e.key==="m"||e.key==="M") && selectedIds.size>=2){ e.preventDefault(); mergeSelected(); }
