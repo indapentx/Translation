@@ -998,7 +998,7 @@ ${ps}
       if(selectedIds.size >= 2) mergeSelected(); else seekToCue("next");
     }
     else if((e.key==="Delete"||e.key==="Backspace") && selectedIds.size){ e.preventDefault(); deleteCues([...selectedIds]); }
-    else if(e.key==="Escape" || (e.altKey && (e.key==="d"||e.key==="D"))){ selectedIds.clear(); refreshSelectionUI(); }
+    else if(e.key==="Escape" || e.key==="d" || e.key==="D"){ selectedIds.clear(); refreshSelectionUI(); }
   });
 
   render();   // initial (empty) paint
