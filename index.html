@@ -201,6 +201,7 @@
           <div id="list"></div>
           <div class="hint">
             Click a caption (or checkbox) to select · <kbd>Shift</kbd>+click range ·
+            <kbd>Q</kbd> load video · <kbd>I</kbd> import subtitles ·
             <kbd>N</kbd> prev subtitle · <kbd>M</kbd> next subtitle (or merge if 2+ selected) ·
             <kbd>Del</kbd> delete · <kbd>Space</kbd> play/pause ·
             click a <b style="color:var(--accent)">caption number</b> to jump the video there
@@ -863,7 +864,9 @@ ${ps}
     if(mod && (e.key.toLowerCase()==="y" || (e.shiftKey && e.key.toLowerCase()==="z"))){ e.preventDefault(); redo(); return; }
     if(e.key===" " && hasVideo){ e.preventDefault(); player.paused ? player.play() : player.pause(); return; }
     if(mod && e.key.toLowerCase()==="a"){ e.preventDefault(); if(cues.length){ selectedIds=new Set(cues.map(c=>c.id)); refreshSelectionUI(); } return; }
-    if(e.key==="n"||e.key==="N"){ e.preventDefault(); seekToCue("prev"); }
+    if(e.key==="q"||e.key==="Q"){ e.preventDefault(); videoInput.click(); }
+    else if(e.key==="i"||e.key==="I"){ e.preventDefault(); fileInput.click(); }
+    else if(e.key==="n"||e.key==="N"){ e.preventDefault(); seekToCue("prev"); }
     else if(e.key==="m"||e.key==="M"){
       e.preventDefault();
       if(selectedIds.size >= 2) mergeSelected(); else seekToCue("next");
