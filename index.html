@@ -46,7 +46,7 @@
   /* ---------- layout ---------- */
   main{max-width:1320px; margin:0 auto; padding:18px 20px 80px}
   #workspace{display:flex; gap:16px; align-items:flex-start}
-  #videoPanel{position:sticky; top:116px; width:400px; flex-shrink:0; display:flex; flex-direction:column; gap:10px}
+  #videoPanel{position:sticky; top:116px; width:560px; flex-shrink:0; display:flex; flex-direction:column; gap:10px}
   #listWrap{flex:1 1 auto; min-width:0}
   @media (max-width:920px){
     #workspace{flex-direction:column}
@@ -71,7 +71,7 @@
   .video-wrap{position:relative; width:100%; background:#000; border:1px solid var(--border);
     border-radius:12px; overflow:hidden}
   #player{display:block; width:100%; aspect-ratio:16/9; object-fit:contain; background:#000}
-  #subOverlay{position:absolute; left:0; right:0; bottom:13%; text-align:center;
+  #subOverlay{position:absolute; left:0; right:0; top:6%; text-align:center;
     pointer-events:none; padding:0 14px; font-size:16px; line-height:1.5; z-index:2}
   #subOverlay span{display:inline; background:rgba(0,0,0,.74); color:#fff; font-weight:500;
     padding:.12em .42em; border-radius:4px; box-decoration-break:clone; -webkit-box-decoration-break:clone}
@@ -736,6 +736,7 @@ ${ps}
     videoURL = URL.createObjectURL(file);
     hasVideo = true;
     player.src = videoURL;
+    player.volume = 0.2;
     videoNameEl.textContent = file.name;
     render();
     toast("Loaded video: " + file.name);
